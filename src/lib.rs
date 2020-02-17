@@ -170,9 +170,9 @@ struct SubstrateBlock<B: Blockchain> {
 }
 
 /// Start listening requests from given contract.
-pub async fn start_service<B, E, TP, KS, LR>(
+pub async fn start_service<B, E, TP, KS>(
 	key_server: Arc<KS>,
-	listener_registrar: Arc<LR>,
+	listener_registrar: Arc<dyn ServiceTasksListenerRegistrar>,
 	blockchain: Arc<B>,
 	executor: Arc<E>,
 	transaction_pool: Arc<TP>,
@@ -182,7 +182,6 @@ pub async fn start_service<B, E, TP, KS, LR>(
 	B: Blockchain,
 	E: Executor,
 	TP: TransactionPool,
-	LR: ServiceTasksListenerRegistrar,
 	KS: KeyServer,
 {
 //	let config = Arc::new(config);
