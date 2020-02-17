@@ -117,21 +117,33 @@ impl<B, P> parity_secretstore_blockchain_service::TransactionPool
 		)
 	}
 
-	fn publish_server_key_generation_error(&self, _contract_address: Address, _key_id: ServerKeyId) {
-		unimplemented!()
+	fn publish_server_key_generation_error(&self, _origin: Address, key_id: ServerKeyId) {
+		self.submit_response_transaction(
+			|| format!("ServerKeyGenerationFailure({})", key_id),
+			|| self.blockchain.is_server_key_generation_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::ServerKeyGenerationError(key_id)),
+		)
 	}
 
 	fn publish_retrieved_server_key(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_artifacts: ServerKeyRetrievalArtifacts,
+		_origin: Address,
+		key_id: ServerKeyId,
+		artifacts: ServerKeyRetrievalArtifacts,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("ServerKeyRetrievalSuccess({})", key_id),
+			|| self.blockchain.is_server_key_retrieval_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::ServerKeyRetrieved(key_id, artifacts.key)),
+		)
 	}
 
-	fn publish_server_key_retrieval_error(&self, _contract_address: Address, _key_id: ServerKeyId) {
-		unimplemented!()
+	fn publish_server_key_retrieval_error(&self, _origin: Address, key_id: ServerKeyId) {
+		self.submit_response_transaction(
+			|| format!("ServerKeyRetrievalFailure({})", key_id),
+			|| self.blockchain.is_server_key_retrieval_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::ServerKeyRetrievalError(key_id)),
+		)
 	}
 
 	fn publish_stored_document_key(&self, _contract_address: Address, _key_id: ServerKeyId) {

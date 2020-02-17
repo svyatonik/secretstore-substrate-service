@@ -64,8 +64,14 @@ pub trait MaybeSecretStoreEvent {
 
 /// Substrate Secret Store module calls.
 pub enum SecretStoreCall {
-	/// Called when server kye is generated.
+	/// Called when server key is generated.
 	ServerKeyGenerated(ServerKeyId, Public),
+	/// Called when server key generation error happens.
+	ServerKeyGenerationError(ServerKeyId),
+	/// Called when server key is retrieved.
+	ServerKeyRetrieved(ServerKeyId, Public),
+	/// Called when server key retrieval error happens.
+	ServerKeyRetrievalError(ServerKeyId),
 }
 
 /// Substrate blockchain.
@@ -104,6 +110,12 @@ pub trait Blockchain: 'static + Send + Sync {
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
 	) -> Result<Vec<BlockchainServiceTask>, String>;
+	/// Is server key retrieval request response required?
+	fn is_server_key_retrieval_response_required(
+		&self,
+		key_id: ServerKeyId,
+		key_server_id: KeyServerId,
+	) -> Result<bool, String>;
 
 	/// Get pending document key store tasks range at given block.
 	fn document_key_store_tasks(
