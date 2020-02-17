@@ -20,8 +20,9 @@ use std::{
 	sync::Arc,
 };
 use futures::{Stream, StreamExt};
+use log::error;
 use parity_secretstore_primitives::{
-	Address, KeyServerId,
+	Address, KeyServerId, Public, ServerKeyId,
 	error::Error,
 	executor::Executor,
 	key_server::KeyServer,
@@ -63,6 +64,8 @@ pub trait MaybeSecretStoreEvent {
 
 /// Substrate Secret Store module calls.
 pub enum SecretStoreCall {
+	/// Called when server kye is generated.
+	ServerKeyGenerated(ServerKeyId, Public),
 }
 
 /// Substrate blockchain.
@@ -82,59 +85,45 @@ pub trait Blockchain: 'static + Send + Sync {
 	/// current set should have been read from the best block.
 	fn current_key_servers_set(&self) -> BTreeSet<KeyServerId>;
 
-	/// Get number of pending server key generation tasks at given block.
-	fn server_key_generation_tasks_len(
-		&self,
-		block_hash: Self::BlockHash,
-	) -> usize;
 	/// Get pending server key generation tasks range at given block.
 	fn server_key_generation_tasks(
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Vec<BlockchainServiceTask>;
-
-	/// Get number of pending server key retrieval tasks at given block.
-	fn server_key_retrieval_tasks_len(
+	) -> Result<Vec<BlockchainServiceTask>, String>;
+	/// Is server key generation request response required?
+	fn is_server_key_generation_response_required(
 		&self,
-		block_hash: Self::BlockHash,
-	) -> usize;
+		key_id: ServerKeyId,
+		key_server_id: KeyServerId,
+	) -> Result<bool, String>;
+
 	/// Get pending server key retrieval tasks range at given block.
 	fn server_key_retrieval_tasks(
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Vec<BlockchainServiceTask>;
+	) -> Result<Vec<BlockchainServiceTask>, String>;
 
-	/// Get number of pending document key store tasks at given block.
-	fn document_key_store_tasks_len(
-		&self,
-		block_hash: Self::BlockHash,
-	) -> usize;
 	/// Get pending document key store tasks range at given block.
 	fn document_key_store_tasks(
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Vec<BlockchainServiceTask>;
+	) -> Result<Vec<BlockchainServiceTask>, String>;
 
-	/// Get number of pending document key store tasks at given block.
-	fn document_key_shadow_retrieval_tasks_len(
-		&self,
-		block_hash: Self::BlockHash,
-	) -> usize;
 	/// Get pending document key store tasks range at given block.
 	fn document_key_shadow_retrieval_tasks(
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Vec<BlockchainServiceTask>;
+	) -> Result<Vec<BlockchainServiceTask>, String>;
 }
 
 /// Transaction pool API.
 pub trait TransactionPool: Send + Sync + 'static {
 	/// Transaction hash.
-	type TransactionHash;
+	type TransactionHash: std::fmt::Display;
 
 	/// Submit transaction to the pool.
 	fn submit_transaction(&self, call: SecretStoreCall) -> Result<Self::TransactionHash, String>;
@@ -171,7 +160,7 @@ pub async fn start_service<B, E, TP, KS, LR>(
 	let transaction_pool = Arc::new(SubstrateTransactionPool::new(
 		blockchain.clone(),
 		transaction_pool,
-		//key_server_address.clone(),
+		key_server_address.clone(),
 	));
 	parity_secretstore_blockchain_service::start_service(
 		key_server,
@@ -248,7 +237,10 @@ struct PendingTasksIterator<F> {
 	get_pending_tasks: F,
 }
 
-impl<F: Fn(Range<usize>) -> Vec<BlockchainServiceTask>> Iterator for PendingTasksIterator<F> {
+impl<F> Iterator for PendingTasksIterator<F>
+	where
+		F: Fn(Range<usize>) -> Result<Vec<BlockchainServiceTask>, String>,
+{
 	type Item = BlockchainServiceTask;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -265,7 +257,15 @@ impl<F: Fn(Range<usize>) -> Vec<BlockchainServiceTask>> Iterator for PendingTask
 
 			let next_range_start = self.range.start + PENDING_RANGE_LENGTH;
 			let pending_range = self.range.start..next_range_start;
-			self.pending.extend((self.get_pending_tasks)(pending_range));
+			match (self.get_pending_tasks)(pending_range) {
+				Ok(tasks) => self.pending.extend(tasks),
+				Err(error) => error!(
+					target: "secretstore",
+					"Failed to read pending tasks: {}",
+					error,
+				),
+			}
+
 			if self.pending.len() == PENDING_RANGE_LENGTH {
 				self.range = next_range_start..self.range.end;
 			} else {
@@ -277,10 +277,15 @@ impl<F: Fn(Range<usize>) -> Vec<BlockchainServiceTask>> Iterator for PendingTask
 
 /// Convert Secret Store event to blockchain service task.
 fn event_into_task(event: SecretStoreEvent) -> Option<BlockchainServiceTask> {
+	// right now we only support one SS module per runtime
+	// if we ever will need multiple SS modules support, then we'll probably
+	// need some Fn(Module) -> Address map function
+	let origin = Default::default();
+
 	match event {
 		SecretStoreEvent::ServerKeyGenerationRequested(key_id, requester_address, threshold)
 			=> Some(BlockchainServiceTask::Regular(
-				Default::default(),
+				origin,
 				ServiceTask::GenerateServerKey(
 					key_id,
 					Requester::Address(requester_address),

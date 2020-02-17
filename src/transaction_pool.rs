@@ -15,6 +15,7 @@
 // along with Parity Secret Store.  If not, see <http://www.gnu.org/licenses/>.
 
 use std::sync::Arc;
+use log::{error, trace};
 use parity_secretstore_primitives::{
 	Address, ServerKeyId,
 	key_server::{
@@ -24,15 +25,17 @@ use parity_secretstore_primitives::{
 	requester::Requester,
 };
 use crate::{
-	Blockchain, TransactionPool,
+	Blockchain, SecretStoreCall, TransactionPool,
 };
 
 /// Substrate transction pool.
 pub struct SubstrateTransactionPool<B, P> {
 	/// Shared blockchain reference.
-	_blockchain: Arc<B>,
+	blockchain: Arc<B>,
 	/// Shared reference to actual transaction pool.
-	_transaction_pool: Arc<P>,
+	transaction_pool: Arc<P>,
+	/// This key server address.
+	key_server_address: Address,
 }
 
 impl<B, P> SubstrateTransactionPool<B, P>
@@ -42,12 +45,54 @@ impl<B, P> SubstrateTransactionPool<B, P>
 {
 	/// Create new transaction pool.
 	pub fn new(
-		_blockchain: Arc<B>,
-		_transaction_pool: Arc<P>,
+		blockchain: Arc<B>,
+		transaction_pool: Arc<P>,
+		key_server_address: Address,
 	) -> Self {
 		SubstrateTransactionPool {
-			_blockchain,
-			_transaction_pool,
+			blockchain,
+			transaction_pool,
+			key_server_address,
+		}
+	}
+
+	/// Send response transaction if required.
+	fn submit_response_transaction(
+		&self,
+		format_request: impl Fn() -> String,
+		is_response_required: impl FnOnce() -> Result<bool, String>,
+		prepare_response: impl FnOnce() -> Result<SecretStoreCall, String>,
+	) {
+		match is_response_required() {
+			Ok(true) => (),
+			Ok(false) => return,
+			Err(error) => error!(
+				target: "secretstore",
+				"Failed to check if response {} is required: {}",
+				format_request(),
+				error,
+			),
+		}
+
+		let submit_result = prepare_response()
+			.and_then(|transaction| self
+				.transaction_pool
+				.submit_transaction(transaction)
+			);
+
+		match submit_result {
+			Ok(transaction_hash) => trace!(
+				target: "secretstore",
+				"Submitted response {}: {}",
+				format_request(),
+				transaction_hash,
+			),
+			Err(error) => error!(
+				target: "secretstore",
+				"Failed to submit response {}: {}",
+				format_request(),
+				error,
+			),
 		}
 	}
 }
@@ -61,11 +106,15 @@ impl<B, P> parity_secretstore_blockchain_service::TransactionPool
 {
 	fn publish_generated_server_key(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_artifacts: ServerKeyGenerationArtifacts,
+		_origin: Address,
+		key_id: ServerKeyId,
+		artifacts: ServerKeyGenerationArtifacts,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("ServerKeyGenerationSuccess({})", key_id),
+			|| self.blockchain.is_server_key_generation_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::ServerKeyGenerated(key_id, artifacts.key)),
+		)
 	}
 
 	fn publish_server_key_generation_error(&self, _contract_address: Address, _key_id: ServerKeyId) {
