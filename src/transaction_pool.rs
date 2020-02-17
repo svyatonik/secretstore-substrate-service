@@ -146,12 +146,20 @@ impl<B, P> parity_secretstore_blockchain_service::TransactionPool
 		)
 	}
 
-	fn publish_stored_document_key(&self, _contract_address: Address, _key_id: ServerKeyId) {
-		unimplemented!()
+	fn publish_stored_document_key(&self, _origin: Address, key_id: ServerKeyId) {
+		self.submit_response_transaction(
+			|| format!("DocumentKeyStoreSuccess({})", key_id),
+			|| self.blockchain.is_document_key_store_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::DocumentKeyStored(key_id)),
+		)
 	}
 
-	fn publish_document_key_store_error(&self, _contract_address: Address, _key_id: ServerKeyId) {
-		unimplemented!()
+	fn publish_document_key_store_error(&self, _origin: Address, key_id: ServerKeyId) {
+		self.submit_response_transaction(
+			|| format!("DocumentKeyStoreFailure({})", key_id),
+			|| self.blockchain.is_document_key_store_response_required(key_id, self.key_server_address),
+			|| Ok(SecretStoreCall::DocumentKeyStoreError(key_id)),
+		)
 	}
 
 	fn publish_retrieved_document_key_common(

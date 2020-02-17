@@ -72,6 +72,10 @@ pub enum SecretStoreCall {
 	ServerKeyRetrieved(ServerKeyId, Public),
 	/// Called when server key retrieval error happens.
 	ServerKeyRetrievalError(ServerKeyId),
+	/// Called when document key is stored.
+	DocumentKeyStored(ServerKeyId),
+	/// Called when document key store error happens.
+	DocumentKeyStoreError(ServerKeyId),
 }
 
 /// Substrate blockchain.
@@ -123,6 +127,12 @@ pub trait Blockchain: 'static + Send + Sync {
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
 	) -> Result<Vec<BlockchainServiceTask>, String>;
+	/// Is document key store request response required?
+	fn is_document_key_store_response_required(
+		&self,
+		key_id: ServerKeyId,
+		key_server_id: KeyServerId,
+	) -> Result<bool, String>;
 
 	/// Get pending document key store tasks range at given block.
 	fn document_key_shadow_retrieval_tasks(
