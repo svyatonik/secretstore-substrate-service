@@ -41,11 +41,6 @@ pub use parity_secretstore_blockchain_service::Configuration;
 
 pub type BlockchainServiceTask = parity_secretstore_blockchain_service::BlockchainServiceTask;
 
-//mod document_key_shadow_retrieval;
-//mod document_key_store;
-//mod server_key_generation;
-//mod server_key_retrieval;
-//mod services;
 mod transaction_pool;
 
 /// Substrate block id.
