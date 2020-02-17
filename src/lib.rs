@@ -86,7 +86,7 @@ pub trait Blockchain: 'static + Send + Sync {
 	/// Blockchain event type.
 	type Event: MaybeSecretStoreEvent;
 	/// Block events iterator type.
-	type BlockEvents: Iterator<Item = Self::Event>;
+	type BlockEvents: IntoIterator<Item = Self::Event>;
 
 	/// Get block events.
 	fn block_events(&self, block_hash: Self::BlockHash) -> Self::BlockEvents;
