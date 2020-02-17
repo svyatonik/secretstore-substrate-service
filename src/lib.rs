@@ -87,6 +87,8 @@ pub trait Blockchain: 'static + Send + Sync {
 	type Event: MaybeSecretStoreEvent;
 	/// Block events iterator type.
 	type BlockEvents: IntoIterator<Item = Self::Event>;
+	/// Pending events iterator type.
+	type PendingEvents: IntoIterator<Item = Self::Event>;
 
 	/// Get block events.
 	fn block_events(&self, block_hash: Self::BlockHash) -> Self::BlockEvents;
@@ -101,7 +103,7 @@ pub trait Blockchain: 'static + Send + Sync {
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Result<Vec<BlockchainServiceTask>, String>;
+	) -> Result<Self::PendingEvents, String>;
 	/// Is server key generation request response required?
 	fn is_server_key_generation_response_required(
 		&self,
@@ -114,7 +116,7 @@ pub trait Blockchain: 'static + Send + Sync {
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Result<Vec<BlockchainServiceTask>, String>;
+	) -> Result<Self::PendingEvents, String>;
 	/// Is server key retrieval request response required?
 	fn is_server_key_retrieval_response_required(
 		&self,
@@ -127,7 +129,7 @@ pub trait Blockchain: 'static + Send + Sync {
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Result<Vec<BlockchainServiceTask>, String>;
+	) -> Result<Self::PendingEvents, String>;
 	/// Is document key store request response required?
 	fn is_document_key_store_response_required(
 		&self,
@@ -140,7 +142,7 @@ pub trait Blockchain: 'static + Send + Sync {
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
-	) -> Result<Vec<BlockchainServiceTask>, String>;
+	) -> Result<Self::PendingEvents, String>;
 	/// Is document key shadow retrieval request response required?
 	fn is_document_key_shadow_retrieval_response_required(
 		&self,
@@ -222,17 +224,41 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 
 	fn pending_tasks(&mut self) -> Self::PendingBlocksIterator {
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
-		let server_key_generation_tasks = move |range|
-			blockchain.server_key_generation_tasks(block_hash.clone(), range);
+		let server_key_generation_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
+			Ok(tasks.extend(
+				blockchain
+					.server_key_generation_tasks(block_hash.clone(), range)?
+					.into_iter()
+					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
+					.filter_map(event_into_task)
+			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
-		let server_key_retrieval_tasks = move |range|
-			blockchain.server_key_retrieval_tasks(block_hash.clone(), range);
+		let server_key_retrieval_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
+			Ok(tasks.extend(
+				blockchain
+					.server_key_retrieval_tasks(block_hash.clone(), range)?
+					.into_iter()
+					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
+					.filter_map(event_into_task)
+			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
-		let document_key_store_tasks = move |range|
-			blockchain.document_key_store_tasks(block_hash.clone(), range);
+		let document_key_store_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
+			Ok(tasks.extend(
+				blockchain
+					.document_key_store_tasks(block_hash.clone(), range)?
+					.into_iter()
+					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
+					.filter_map(event_into_task)
+			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
-		let document_key_shadow_retrieval_tasks = move |range|
-			blockchain.document_key_shadow_retrieval_tasks(block_hash.clone(), range);
+		let document_key_shadow_retrieval_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
+			Ok(tasks.extend(
+				blockchain
+					.document_key_shadow_retrieval_tasks(block_hash.clone(), range)?
+					.into_iter()
+					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
+					.filter_map(event_into_task)
+			));
 
 		Box::new(
 			PendingTasksIterator {
@@ -268,7 +294,7 @@ struct PendingTasksIterator<F> {
 
 impl<F> Iterator for PendingTasksIterator<F>
 	where
-		F: Fn(Range<usize>) -> Result<Vec<BlockchainServiceTask>, String>,
+		F: Fn(&mut VecDeque<BlockchainServiceTask>, Range<usize>) -> Result<(), String>,
 {
 	type Item = BlockchainServiceTask;
 
@@ -286,13 +312,12 @@ impl<F> Iterator for PendingTasksIterator<F>
 
 			let next_range_start = self.range.start + PENDING_RANGE_LENGTH;
 			let pending_range = self.range.start..next_range_start;
-			match (self.get_pending_tasks)(pending_range) {
-				Ok(tasks) => self.pending.extend(tasks),
-				Err(error) => error!(
+			if let Err(error) = (self.get_pending_tasks)(&mut self.pending, pending_range) {
+				error!(
 					target: "secretstore",
 					"Failed to read pending tasks: {}",
 					error,
-				),
+				);
 			}
 
 			if self.pending.len() == PENDING_RANGE_LENGTH {
