@@ -134,7 +134,8 @@ impl<B, P> parity_secretstore_blockchain_service::TransactionPool
 		self.submit_response_transaction(
 			|| format!("ServerKeyRetrievalSuccess({})", key_id),
 			|| self.blockchain.is_server_key_retrieval_response_required(key_id, self.key_server_address),
-			|| Ok(SecretStoreCall::ServerKeyRetrieved(key_id, artifacts.key)),
+			|| serialize_threshold(artifacts.threshold)
+				.map(|threshold| SecretStoreCall::ServerKeyRetrieved(key_id, artifacts.key, threshold)),
 		)
 	}
 
@@ -164,39 +165,146 @@ impl<B, P> parity_secretstore_blockchain_service::TransactionPool
 
 	fn publish_retrieved_document_key_common(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_requester: Requester,
-		_artifacts: DocumentKeyCommonRetrievalArtifacts,
+		_origin: Address,
+		key_id: ServerKeyId,
+		requester: Requester,
+		artifacts: DocumentKeyCommonRetrievalArtifacts,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("DocumentKeyCommonRetrievalSuccess({}, {})", key_id, requester),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.and_then(|requester|
+					self.blockchain
+						.is_document_key_shadow_retrieval_response_required(
+							key_id,
+							requester,
+							self.key_server_address,
+						)
+				),
+			|| serialize_threshold(artifacts.threshold)
+				.and_then(|threshold|
+					requester
+						.address(&key_id)
+						.map_err(Into::into)
+						.map(|requester| (threshold, requester))
+				)
+				.map(|(threshold, requester)| SecretStoreCall::DocumentKeyCommonRetrieved(
+					key_id,
+					requester,
+					artifacts.common_point,
+					threshold,
+				)),
+		)
 	}
 
 	fn publish_document_key_common_retrieval_error(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_requester: Requester,
+		_origin: Address,
+		key_id: ServerKeyId,
+		requester: Requester,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("DocumentKeyCommonRetrievalFailure({}, {})", key_id, requester),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.and_then(|requester|
+					self.blockchain
+						.is_document_key_shadow_retrieval_response_required(
+							key_id,
+							requester,
+							self.key_server_address,
+						)
+				),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.map(|requester| SecretStoreCall::DocumentKeyShadowRetrievalError(
+					key_id,
+					requester,
+				)),
+		)
 	}
 
 	fn publish_retrieved_document_key_personal(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_requester: Requester,
-		_artifacts: DocumentKeyShadowRetrievalArtifacts,
+		_origin: Address,
+		key_id: ServerKeyId,
+		requester: Requester,
+		artifacts: DocumentKeyShadowRetrievalArtifacts,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("DocumentKeyPersonalRetrievalSuccess({}, {})", key_id, requester),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.and_then(|requester|
+					self.blockchain
+						.is_document_key_shadow_retrieval_response_required(
+							key_id,
+							requester,
+							self.key_server_address,
+						)
+				),
+			|| {
+				let self_coefficient = artifacts
+					.participants_coefficients
+					.get(&self.key_server_address)
+					.cloned()
+					.ok_or_else(|| String::from(
+						"DocumentKeyPersonalRetrieval session has completed without self coefficient",
+					))?;
+
+				requester
+					.address(&key_id)
+					.map_err(Into::into)
+					.map(|requester| SecretStoreCall::DocumentKeyPersonalRetrieved(
+						key_id,
+						requester,
+						artifacts.participants_coefficients.keys().cloned().collect::<Vec<_>>(),
+						artifacts.encrypted_document_key,
+						self_coefficient,
+					))
+			},
+		)
 	}
 
 	fn publish_document_key_personal_retrieval_error(
 		&self,
-		_contract_address: Address,
-		_key_id: ServerKeyId,
-		_requester: Requester,
+		_origin: Address,
+		key_id: ServerKeyId,
+		requester: Requester,
 	) {
-		unimplemented!()
+		self.submit_response_transaction(
+			|| format!("DocumentKeyPersonalRetrievalFailure({}, {})", key_id, requester),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.and_then(|requester|
+					self.blockchain
+						.is_document_key_shadow_retrieval_response_required(
+							key_id,
+							requester,
+							self.key_server_address,
+						)
+				),
+			|| requester
+				.address(&key_id)
+				.map_err(Into::into)
+				.map(|requester| SecretStoreCall::DocumentKeyShadowRetrievalError(
+					key_id,
+					requester,
+				)),
+		)
 	}
+}
+
+/// Serialize threshold (we only support 256 KS at max).
+pub fn serialize_threshold(threshold: usize) -> Result<u8, String> {
+	if threshold > ::std::u8::MAX as usize {
+		return Err(format!("invalid threshold to use in service contract: {}", threshold));
+	}
+	Ok(threshold as _)
 }

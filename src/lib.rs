@@ -69,13 +69,19 @@ pub enum SecretStoreCall {
 	/// Called when server key generation error happens.
 	ServerKeyGenerationError(ServerKeyId),
 	/// Called when server key is retrieved.
-	ServerKeyRetrieved(ServerKeyId, Public),
+	ServerKeyRetrieved(ServerKeyId, Public, u8),
 	/// Called when server key retrieval error happens.
 	ServerKeyRetrievalError(ServerKeyId),
 	/// Called when document key is stored.
 	DocumentKeyStored(ServerKeyId),
 	/// Called when document key store error happens.
 	DocumentKeyStoreError(ServerKeyId),
+	/// Called when document key common part is retrieved.
+	DocumentKeyCommonRetrieved(ServerKeyId, Address, Public, u8),
+	/// Called when document key personal part is retrieved.
+	DocumentKeyPersonalRetrieved(ServerKeyId, Address, Vec<Address>, Public, Vec<u8>),
+	/// Called when document key shadow retireval error happens.
+	DocumentKeyShadowRetrievalError(ServerKeyId, Address),
 }
 
 /// Substrate blockchain.
@@ -134,12 +140,19 @@ pub trait Blockchain: 'static + Send + Sync {
 		key_server_id: KeyServerId,
 	) -> Result<bool, String>;
 
-	/// Get pending document key store tasks range at given block.
+	/// Get pending document key shadow retrieval tasks range at given block.
 	fn document_key_shadow_retrieval_tasks(
 		&self,
 		block_hash: Self::BlockHash,
 		range: Range<usize>,
 	) -> Result<Vec<BlockchainServiceTask>, String>;
+	/// Is document key shadow retrieval request response required?
+	fn is_document_key_shadow_retrieval_response_required(
+		&self,
+		key_id: ServerKeyId,
+		requester: Address,
+		key_server_id: KeyServerId,
+	) -> Result<bool, String>;
 }
 
 /// Transaction pool API.
