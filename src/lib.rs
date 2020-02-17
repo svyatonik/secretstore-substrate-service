@@ -159,7 +159,7 @@ pub trait TransactionPool: Send + Sync + 'static {
 	fn submit_transaction(&self, call: SecretStoreCall) -> Result<Self::TransactionHash, String>;
 }
 
-/// Ethereum block passed to the blockchain service.
+/// Substrate block passed to the blockchain service.
 struct SubstrateBlock<B: Blockchain> {
 	/// Origin block.
 	pub block_hash: B::BlockHash,

@@ -1,5 +1,5 @@
 [package]
-name = "parity-secretstore-ethereum-service"
+name = "parity-secretstore-substrate-service"
 version = "1.0.0"
 license = "GPL-3.0"
 authors = ["Parity Technologies <admin@parity.io>"]
