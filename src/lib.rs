@@ -26,11 +26,7 @@ use parity_secretstore_primitives::{
 	error::Error,
 	executor::Executor,
 	key_server::KeyServer,
-	requester::Requester,
-	service::{ServiceTask, ServiceTasksListenerRegistrar},
-};
-use substrate_secret_store_runtime::{
-	Event as SecretStoreEvent,
+	service::ServiceTasksListenerRegistrar,
 };
 use crate::{
 	transaction_pool::SubstrateTransactionPool,
@@ -54,7 +50,7 @@ pub enum BlockId<Hash> {
 /// Block event that is maybe an event coming from SecretStore runtime module.
 pub trait MaybeSecretStoreEvent {
 	/// Try convert to secret store event.
-	fn as_secret_store_event(self) -> Option<SecretStoreEvent>;
+	fn as_secret_store_event(self) -> Option<BlockchainServiceTask>;
 }
 
 /// Substrate Secret Store module calls.
@@ -218,7 +214,6 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 				.block_events(self.block_hash.clone())
 				.into_iter()
 				.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
-				.filter_map(event_into_task),
 		)
 	}
 
@@ -230,7 +225,6 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 					.server_key_generation_tasks(block_hash.clone(), range)?
 					.into_iter()
 					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
-					.filter_map(event_into_task)
 			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
 		let server_key_retrieval_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
@@ -239,7 +233,6 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 					.server_key_retrieval_tasks(block_hash.clone(), range)?
 					.into_iter()
 					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
-					.filter_map(event_into_task)
 			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
 		let document_key_store_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
@@ -248,7 +241,6 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 					.document_key_store_tasks(block_hash.clone(), range)?
 					.into_iter()
 					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
-					.filter_map(event_into_task)
 			));
 		let (blockchain, block_hash) = (self.blockchain.clone(), self.block_hash.clone());
 		let document_key_shadow_retrieval_tasks = move |tasks: &mut VecDeque<BlockchainServiceTask>, range|
@@ -257,7 +249,6 @@ impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBl
 					.document_key_shadow_retrieval_tasks(block_hash.clone(), range)?
 					.into_iter()
 					.filter_map(MaybeSecretStoreEvent::as_secret_store_event)
-					.filter_map(event_into_task)
 			));
 
 		Box::new(
@@ -329,23 +320,3 @@ impl<F> Iterator for PendingTasksIterator<F>
 	}
 }
 
-/// Convert Secret Store event to blockchain service task.
-fn event_into_task(event: SecretStoreEvent) -> Option<BlockchainServiceTask> {
-	// right now we only support one SS module per runtime
-	// if we ever will need multiple SS modules support, then we'll probably
-	// need some Fn(Module) -> Address map function
-	let origin = Default::default();
-
-	match event {
-		SecretStoreEvent::ServerKeyGenerationRequested(key_id, requester_address, threshold)
-			=> Some(BlockchainServiceTask::Regular(
-				origin,
-				ServiceTask::GenerateServerKey(
-					key_id,
-					Requester::Address(requester_address),
-					threshold as _,
-				),
-			)),
-		_ => unimplemented!(),
-	}
-}
