@@ -19,7 +19,7 @@ use std::{
 	ops::Range,
 	sync::Arc,
 };
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use log::error;
 use parity_secretstore_primitives::{
 	Address, KeyServerId, Public, ServerKeyId,
@@ -168,14 +168,14 @@ struct SubstrateBlock<B: Blockchain> {
 }
 
 /// Start listening requests from given contract.
-pub async fn start_service<B, E, TP, KS>(
+pub fn start_service<B, E, TP, KS>(
 	key_server: Arc<KS>,
 	listener_registrar: Arc<dyn ServiceTasksListenerRegistrar>,
 	blockchain: Arc<B>,
 	executor: Arc<E>,
 	transaction_pool: Arc<TP>,
 	config: Configuration,
-	new_blocks_stream: impl Stream<Item = B::BlockHash>,
+	new_blocks_stream: impl Stream<Item = B::BlockHash> + Send + 'static,
 ) -> Result<(), Error> where
 	B: Blockchain,
 	E: Executor,
@@ -189,19 +189,28 @@ pub async fn start_service<B, E, TP, KS>(
 		transaction_pool,
 		key_server_address.clone(),
 	));
-	parity_secretstore_blockchain_service::start_service(
+	let new_blocks_future = parity_secretstore_blockchain_service::start_service(
 		key_server,
 		listener_registrar,
-		executor,
+		executor.clone(),
 		transaction_pool,
 		config,
 		new_blocks_stream
-			.map(|block_hash| SubstrateBlock {
+			.map(move |block_hash| SubstrateBlock {
 				block_hash,
 				blockchain: blockchain.clone(),
 				key_server_address: key_server_address.clone(),
 			})
-	).await
+	);
+	executor.spawn(new_blocks_future
+		.map(|err| error!(
+			target: "secretstore",
+			"Blockhain service future failed: {:?}",
+			err,
+		))
+		.boxed()
+	);
+	Ok(())
 }
 
 impl<B: Blockchain> parity_secretstore_blockchain_service::Block for SubstrateBlock<B> {
